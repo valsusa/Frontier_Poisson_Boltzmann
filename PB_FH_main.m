@@ -1,4 +1,4 @@
-function [time_elapsed, average_energy_error, average_iterations, max_iterations] = NKpicEC_boltz_j_lde(resolution)
+function [time_elapsed, average_energy_error, average_iterations, max_iterations] = PB_FH_main(resolution)
 
 %%%%%%%%%%%%%%%%%%%%%%%
 % NK PIC
@@ -13,17 +13,24 @@ global DT;
 global N;
 global WP; global QM; global Q; global rho_back e_over_kT lde;
 global x0; global v0;
-global E0 E1 ni Eel phi0 divJ Je;
-global Nonlinear
+global E0 dphi phi0;
+global xc xv t  
+global manufactured k gamma
+global Debye
+
 
 graphics = false;
-Nonlinear = false;
+
+Debye=false;
+
+
 
 % parameters
+manufactured=0;
 %resolution=1
 L=2*pi*10*resolution;
-DT=.125*10;%/resolution;
-NT=200;%*resolution;
+DT=.125*10;
+NT=200;
 NTOUT=25;
 NG=64*resolution;
 N=10000*resolution;
@@ -38,12 +45,13 @@ mode=2*resolution;
 % charge and gris parameter
 Q=WP^2/(QM*N/L);
 rho_back=Q*N/L;
-e_over_kT = -.5;
-%e_over_kT = -1e-5;
 dx=L/NG;
 
+
+gamma=.1;
 lde=2*pi*10/1000;
 e_over_kT=1/lde^2/WP^2;
+k=2*pi/L;
 
 E2f=[];
 
@@ -64,7 +72,6 @@ out=(x0>=L); x0(out)=x0(out)-L;
 
 E0 = zeros(NG+1,1);
 phi0=zeros(NG,1);
-rhoi=ones(NG,1)*rho_back;
 
 % grid
 
@@ -80,53 +87,36 @@ histEnergyP = [];
 histEnergyK = [];
 histSolverIteration = [];
 spettro=[];
+spettro_ex=[];
 test=[];
-Ee=0;
 t=0;
+Ee=0;
 
 time_start = clock();
 for it=1:NT
    it;
-   xkrylov = [v0; phi0]; 
-   [sol, it_hist, ierr] = nsolgm(xkrylov,'residueEC_boltz_j_lde',tol,[100 100 .9]);
-   % res=residueEC_test(sol)
+   xkrylov = [v0]; 
+   [sol, it_hist, ierr] = nsolgm(xkrylov,'PB_FH_residual',tol,[100 100 .9]);
    v_average = sol(1:N);
-   dphi=sol(N+1:N+NG);
-   phi0=phi0+dphi;
-   rhoi=rhoi-DT*divJ;
-   Em=E0;
+   
+      Em=E0;
    E0(2:NG) = E0(2:NG)-(dphi(2:NG)-dphi(1:NG-1))/dx;
    E0(1) = E0(1) - (dphi(1)-dphi(NG))/dx;
    E0(NG+1) = E0(1);
-  x_average = x0 + v_average*DT/2;   
-  out=(x_average<0); x_average(out)=x_average(out)+L;
-out=(x_average>=L);x_average(out)=x_average(out)-L;
+   x_average = x0 + v_average*DT/2;   
+   out=(x_average<0); x_average(out)=x_average(out)+L;
+   out=(x_average>=L);x_average(out)=x_average(out)-L;
    v0 = 2*v_average - v0;
    x0 = x0 + v_average*DT;
    out=(x0<0); x0(out)=x0(out)+L;
    out=(x0>=L);x0(out)=x0(out)-L;
 
-   %E0 = E1;
-   test=[test [sum(E0);  it_hist(end,2)]];
-
-   %E2f=[E2f ; E0'];
-   Ek = 0.5*abs(Q)*sum(v0.^2);
-  % Ep = 0.5*sum(diff(phi0).^2);
-   %Ep = -0.5*sum(phi0.*(rhoi-rho_back*exp(e_over_kT*phi0)))*dx/lde^2+0.5*sum(E0(1:NG).^2)*dx;
-   
-   if(Nonlinear) 
-     Ep = 0.5*sum(rho_back*exp(e_over_kT*(phi0-dphi/2)).*phi0.*phi0)*dx./lde^2+0.5*sum(E0(1:NG).^2)*dx;
-     divJe=-exp(e_over_kT*(phi0- dphi/2)) .* dphi /lde^2/DT;
-   else
-     Ep = 0.5*sum(rho_back*exp(e_over_kT*(phi0-2*dphi/2)).*phi0.*phi0)*dx./lde^2+0.5*sum(E0(1:NG).^2)*dx;
-     divJe=-exp(e_over_kT*(phi0- 2*dphi/2)) .* dphi /lde^2/DT;
-   end 
-  
-
-   
-%      divJe=-exp(e_over_kT*(phi0- 0* dphi/2)) .* dphi /lde^2/DT;
-      
-%         divJe=- dphi /lde^2/DT;
+    if(Debye)
+        divJe=- dphi /lde^2/DT;
+    else    
+        divJe=-exp(e_over_kT*phi0) .* dphi /lde^2/DT;
+    end    
+      phi0=phi0+dphi;
 un=ones(NG-1,1);
 Poisson=spdiags([un -2*un un],[-1 0 1],NG-1,NG-1);
 psi=Poisson\(divJe(1:NG-1)*dx^2);psi=[psi;0];
@@ -134,13 +124,16 @@ Je=zeros(NG+1,1);
 Je(2:NG) = -(psi(2:NG)-psi(1:NG-1))/dx;
 Je(1) = -(psi(1)-psi(NG))/dx;
 Je(NG+1) = Je(1);
+   
+   %E0 = E1;
+   test=[test [sum(E0);  it_hist(end,2)]];
 
+   %E2f=[E2f ; E0'];
+   Ek = 0.5*abs(Q)*sum(v0.^2);
+  % Ep = 0.5*sum(diff(phi0).^2);
+  % Ep = 0.5*sum(E0(1:NG).^2+phi0.^2/lde^2)*dx;
    Ee=Ee+sum(0.5*(E0(1:NG)+Em(1:NG)).*Je(1:NG))*dx*DT;
   Ep=Ee+0.5*sum(E0(1:NG).^2)*dx;
-   
-   %Ep = 0.5*sum(E0(1:NG).^2+phi0.^2./lde^2)*dx;
-  
-   CFL=max(abs(v_average))*DT/dx;
   
    Etot = Ek + Ep;
    histEnergy = [histEnergy Etot];
@@ -148,89 +141,91 @@ Je(NG+1) = Je(1);
    histEnergyK = [histEnergyK Ek];
    histSolverIteration = [histSolverIteration it_hist(end,2)];
    spettro= [spettro phi0];
-if(graphics & mod(it,round(NT/NTOUT))==0)
+if(graphics &mod(it,round(NT/NTOUT))==0)
 subplot(2,3,1:2)
 plot(x0,v0,'.','markersize',[1])
-xlabel('x')
-ylabel('v')
 axis tight
-title(['\omega_{pe}t = ' num2str(CFL) '     CFL = ' num2str(CFL) '      \Delta x/\lambda_{De} = ' num2str(dx/VT)])
+title(['\omega_{pe}t = ' num2str(it*DT) '           \Delta x/\lambda_{De} = ' num2str(dx/VT)])
 subplot(2,3,3)
 plot(xc,phi0)
-xlabel('x')
-ylabel('\phi')
 axis tight
 subplot(2,3,4)
 plot(1:it,histEnergy,1:it,histEnergyP,1:it,histEnergyK)
-xlabel('Cycle')
 legend('Total','Field','Part','location','southeast')
 subplot(2,3,5)
 plot((histEnergy-histEnergy(1))/histEnergy(1))
-xlabel('Cycle')
 axis tight
 title('\delta E')
 subplot(2,3,6)
 plot(test(2,:))
-xlabel('Cycle')
 axis tight
 title('Number iterations')
 pause(.1)  
 end
 
 t=t+DT;
+  if(manufactured) 
+      spettro_ex=[spettro_ex sin(k*xc)*(1-exp(-gamma*t))];
+  end    
 end
 
-% timing
 
+% timing
 time_end = clock();
 resolution
 time_elapsed = etime(time_end,time_start)
-
 average_energy_error=mean((histEnergy-histEnergy(1))/histEnergy(1))
 average_iterations=mean(test(2,:))
 max_iterations=max(test(2,:))
 
-
-figure
-imagesc([0 t], [0 L], spettro)
-xlabel('x/d_e','fontsize',15)
-xlabel('\omega_p t','fontsize',15)
-set(gca, 'fontsize',15)
-colorbar
-print('-depsc','vanillaJFNK_spacetime.eps')
-
-figure
-pcolor(abs(fft2(spettro)))
-shading interp
-
-if(~graphics & mod(it,round(NT/NTOUT))==0)
+if(~graphics &mod(it,round(NT/NTOUT))==0)
 subplot(2,3,1:2)
 plot(x0,v0,'.','markersize',[1])
-xlabel('x')
-ylabel('v')
 axis tight
-title(['\omega_{pe}t = ' num2str(CFL) '     CFL = ' num2str(dx/VT) '      \Delta x/\lambda_{De} = ' num2str(dx/VT)])
+title(['\omega_{pe}t = ' num2str(it*DT) '           \Delta x/\lambda_{De} = ' num2str(dx/VT)])
 subplot(2,3,3)
 plot(xc,phi0)
-xlabel('x')
-ylabel('\phi')
 axis tight
 subplot(2,3,4)
 plot(1:it,histEnergy,1:it,histEnergyP,1:it,histEnergyK)
-xlabel('Cycle')
 legend('Total','Field','Part','location','southeast')
 subplot(2,3,5)
 plot((histEnergy-histEnergy(1))/histEnergy(1))
-xlabel('Cycle')
 axis tight
 title('\delta E')
 subplot(2,3,6)
 plot(test(2,:))
-xlabel('Cycle')
 axis tight
 title('Number iterations')
-print('-depsc','vanillaJFNK.eps')
+pause(.1)  
 end
+
+
+figure
+imagesc([0 t], [0 L], spettro)
+colorbar
+figure
+[Nt Nx]=size(spettro')
+%
+% FFT variable in time
+%
+Fs = 1/DT;                    % Sampling frequency
+T = 1/Fs;                     % Sample time
+w = Fs*pi*linspace(0,1,Nt/2+1);
+%
+% FFT variable in space
+%
+Fs = 1/dx;                    % Sampling frequency
+T = 1/Fs;                     % Sample length
+k = Fs*pi*linspace(0,1,Nx/2+1);
+
+sp=fft2(spettro');
+%pcolor(k,w,abs(sp(1:Nt/2+1,1:Nx/2+1)))
+imagesc(k,w,log(abs(sp(1:Nt/2+1,1:Nx/2+1))))
+axis xy
+ylabel('\omega')
+xlabel('k')
+%shading interp
 
 
 save ECpic.txt histEnergy;
@@ -238,4 +233,18 @@ save PhaseSpaceEC.txt x0 v0;
 save SolverIterations.txt histSolverIteration;
 save TimeEC.txt time_elapsed;
 
+
+ if(manufactured)
+figure 
+subplot(3,1,1)
+imagesc(spettro_ex)
+colorbar
+subplot(3,1,2)
+imagesc(spettro)
+colorbar
+subplot(3,1,3)
+imagesc(spettro-spettro_ex)
+colorbar
+ end
+ 
 end

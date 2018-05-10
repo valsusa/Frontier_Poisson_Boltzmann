@@ -1,4 +1,4 @@
-function res = residueEC_boltz_j_pre(xkrylov)
+function res = PB_JFNK_residuals(xkrylov)
 global L; global dx; global NG;
 global DT;
 
@@ -6,9 +6,10 @@ global N;
 global WP; global QM; global Q; 
 global rho_back e_over_kT lde;
 global x0; global v0;
-global E0 dphi phi0;
-global xc xv t k gamma 
-global Debye
+global E0 E1 ni Eel phi0 divJ Je;
+global Nonlinear
+
+
 
 % calculate the x at n+1/2 time level
 x_average = x0 + xkrylov(1:N)*DT/2;
@@ -20,9 +21,10 @@ p=1:N;p=[p p];
 g1=floor(x_average/dx)+1;     
 g=[g1;g1+1];
 fraz1=1-abs(x_average(1:N)/dx-g1+1); 	
-out=(g<1);g(out)=g(out) + NG;
-out=(g>NG);g(out)=g(out)- NG;
-
+%out=(g<1);g(out)=g(out) + NG;
+%out=(g>NG);g(out)=g(out)- NG;
+g=mod(g-1,NG)+1;
+%[max(g) min(g)]
 % calculate the J
 fraz=[(fraz1).*xkrylov(1:N);(1-fraz1).*xkrylov(1:N)];	
 mat=sparse(p,g,fraz,N,NG);
@@ -32,33 +34,29 @@ J(NG+1)=J(1);
 divJ=zeros(NG,1);
 divJ(1:NG)=(J(2:NG+1)-J(1:NG))/dx;
 
-%manufactured solution
+res = zeros(N+NG,1);
 
-%divJ=-(k^2+1/lde^2)*sin(k*xc)*gamma*exp(-gamma*t);
-
-res = zeros(N,1);
-
-
-un=ones(NG,1);
-
-    if(Debye)
-        olde=1.0/lde^2*dx^2;
-    else    
-        olde=exp(e_over_kT*(phi0(1:NG)))/lde^2*dx^2;
-    end 
-
-%olde=1.0/lde^2*dx^2;
-Poisson=spdiags([un -2*un-olde un],[-1 0 1],NG,NG);
-Poisson(1,NG)=1;
-Poisson(NG,1)=1;
-
-dphi=Poisson\(divJ(1:NG)*dx^2*DT);%dphi=[dphi;0];
-
+dphi= xkrylov(N+1:N+NG);
 dE=zeros(NG+1,1);
 dE(2:NG) = -(dphi(2:NG)-dphi(1:NG-1))/dx;
 dE(1) = -(dphi(1)-dphi(NG))/dx;
 dE(NG+1) = dE(1);
 
+
+% Residual botlzmann
+res(N+2:N+NG-1) = ( dphi(1:NG-2)+dphi(3:NG)-2*dphi(2:NG-1) )/dx^2 ;
+res(N+1) = ( dphi(NG)+dphi(2)-2*dphi(1) )/dx^2 ;
+res(N+NG) = ( dphi(NG-1)+dphi(1)-2*dphi(NG) )/dx^2 ;
+%res(N+1:N+NG) = res(N+1:N+NG) + rho_back.* (ni  - exp(e_over_kT*dphi));
+
+if(Nonlinear) 
+    res(N+1:N+NG) = res(N+1:N+NG) - divJ*DT - exp(e_over_kT*(phi0+ dphi/2)) .* dphi /lde^2;
+else
+    res(N+1:N+NG) = res(N+1:N+NG) - divJ*DT - exp(e_over_kT*(phi0+ 0* dphi/2)) .* dphi /lde^2;
+end    
+%res(N+1:N+NG) = res(N+1:N+NG) - divJ*DT - exp(e_over_kT*(phi0+ dphi/2)) .* dphi /lde^2;
+%res(N+1:N+NG) = res(N+1:N+NG) - divJ*DT - dphi./lde^2;
+%res(N+NG) = dphi(NG);
 
 
 % residual for the average velocity
